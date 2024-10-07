@@ -1056,7 +1056,7 @@ class Uc(RegStateManager):
 
     @staticmethod
     def __ctl_encode(ctl: int, op: int, nargs: int) -> int:
-        assert nargs and (nargs & ~0b1111) == 0, f'nargs must not exceed value of 15 (got {nargs})'
+        assert (nargs & ~0b1111) == 0, f'nargs must not exceed value of 15 (got {nargs})'
         assert op and (op & ~0b11) == 0, f'op must not exceed value of 3 (got {op})'
 
         return (op << 30) | (nargs << 26) | ctl
