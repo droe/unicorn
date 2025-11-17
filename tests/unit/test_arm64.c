@@ -785,12 +785,12 @@ static void test_arm64_pauth(void)
     const uint32_t APIBKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b011 };
     const uint32_t APDAKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b000 };
     const uint32_t APDAKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b001 };
-    test_arm64_pauth_cp_reg_write(uc, APIAKeyLo_EL1, 0xAAAAAAAAAAAAAAAA);
-    test_arm64_pauth_cp_reg_write(uc, APIAKeyHi_EL1, 0xBBBBBBBBBBBBBBBB);
-    test_arm64_pauth_cp_reg_write(uc, APIBKeyLo_EL1, 0xCCCCCCCCCCCCCCCC); // != IA
-    test_arm64_pauth_cp_reg_write(uc, APIBKeyHi_EL1, 0xDDDDDDDDDDDDDDDD);
-    test_arm64_pauth_cp_reg_write(uc, APDAKeyLo_EL1, 0xAAAAAAAAAAAAAAAA); // == IA
-    test_arm64_pauth_cp_reg_write(uc, APDAKeyHi_EL1, 0xBBBBBBBBBBBBBBBB);
+    test_arm64_pauth_cp_reg_write(uc, APIAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL);
+    test_arm64_pauth_cp_reg_write(uc, APIAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
+    test_arm64_pauth_cp_reg_write(uc, APIBKeyLo_EL1, 0xCCCCCCCCCCCCCCCCULL); // != IA
+    test_arm64_pauth_cp_reg_write(uc, APIBKeyHi_EL1, 0xDDDDDDDDDDDDDDDDULL);
+    test_arm64_pauth_cp_reg_write(uc, APDAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL); // == IA
+    test_arm64_pauth_cp_reg_write(uc, APDAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
 
     // Verify that paciza and uc_ctl_pauth_sign() result in the same signed
     // pointer.
@@ -815,15 +815,19 @@ static void test_arm64_pauth(void)
 
     // Verify that authenticating works as expected.
 
-    bool valid = false;
+    bool valid = true;
     OK(uc_ctl_pauth_auth(uc, ptr, UC_ARM64_PAUTH_KEY_IA, 0, &valid));
     TEST_CHECK(!valid); // unsigned pointer
+    valid = false;
     OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_IA, 0, &valid));
     TEST_CHECK(valid);  // signed pointer
+    valid = true;
     OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_IA, 1337, &valid));
     TEST_CHECK(!valid); // wrong diversifier
+    valid = true;
     OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_IB, 0, &valid));
     TEST_CHECK(!valid); // wrong but enabled key
+    valid = true;
     OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_DA, 0, &valid));
     TEST_CHECK(!valid); // disabled but same value key
 
