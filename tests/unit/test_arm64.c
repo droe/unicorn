@@ -750,8 +750,6 @@ static void test_arm64_pauth(void)
 
     const uint64_t some_unsigned_pointer = 0x0000aaaabbbbccccULL;
     const uint64_t pac_mask = 0xffff000000000000ULL & ~(1ULL << 55);
-    static_assert((some_unsigned_pointer & pac_mask) == 0,
-                  "unsigned pointer must not have any PAC bits set");
 
     OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
     OK(uc_ctl_set_cpu_model(uc, UC_CPU_ARM64_MAX));
