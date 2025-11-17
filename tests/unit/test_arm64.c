@@ -122,7 +122,7 @@ static void test_arm64_code_patching_count(void)
     OK(uc_close(uc));
 }
 
-static void test_arm64_v8_pac(void)
+static void test_arm64_v8_cas(void)
 {
     uc_engine *uc;
     char code[] = "\x28\xfd\xea\xc8"; // casal x10, x8, [x9]
@@ -698,7 +698,7 @@ static void test_arm64_pc_guarantee(void)
 TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_code_patching", test_arm64_code_patching},
              {"test_arm64_code_patching_count", test_arm64_code_patching_count},
-             {"test_arm64_v8_pac", test_arm64_v8_pac},
+             {"test_arm64_v8_cas", test_arm64_v8_cas},
              {"test_arm64_read_sctlr", test_arm64_read_sctlr},
              {"test_arm64_hook_insn_mrs", test_arm64_hook_insn_mrs},
              {"test_arm64_hook_insn_wfi", test_arm64_hook_insn_wfi},
