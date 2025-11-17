@@ -1253,16 +1253,15 @@ class Uc(RegStateManager):
 
         self.ctl(ctl, uc.UC_CTL_IO_WRITE, *cargs)
 
-    def __ctl_wr(self, ctl: int, arg0: Arg, arg1: Arg):
-        atype, avalue = arg0
-        carg0 = atype(avalue)
+    def __ctl_wr(self, ctl: int, *args: Arg):
+        cargs = (atype(avalue) for atype, avalue in args[:-1])
 
-        atype, _ = arg1
-        carg1 = atype()
+        atype, _ = args[-1]
+        cretv = atype()
 
-        self.ctl(ctl, uc.UC_CTL_IO_READ_WRITE, carg0, ctypes.byref(carg1))
+        self.ctl(ctl, uc.UC_CTL_IO_READ_WRITE, *cargs, ctypes.byref(cretv))
 
-        return carg1.value
+        return cretv.value
 
     def ctl_get_mode(self) -> int:
         """Retrieve current processor mode.
