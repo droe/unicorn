@@ -744,6 +744,11 @@ static void test_arm64_pauth(void)
 {
     uc_engine *uc;
     const char code_paciza_x1[] = "\xe1\x23\xc1\xda"; // paciza x1
+    const char code_autiza_x1[] = "\xe1\x33\xc1\xda"; // autiza x1
+    const char code_autizb_x1[] = "\xe1\x37\xc1\xda"; // autizb x1
+    const char code_autdza_x1[] = "\xe1\x3b\xc1\xda"; // autdza x1
+    const char code_autia_x1_x0[] = "\x01\x10\xc1\xda"; // autia x1, x0
+    const char code_xpaci_x1[] = "\xe1\x43\xc1\xda"; // xpaci x1
 
     // We expect a PAC added somewhere in pac_mask bits in order to make the
     // test agnostic of TxSZ and TBI.
@@ -753,6 +758,7 @@ static void test_arm64_pauth(void)
 
     OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
     OK(uc_ctl_set_cpu_model(uc, UC_CPU_ARM64_MAX));
+    OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
 
     // Check the CPU actually supports any form of PAuth, i.e. any APA or API
     // bits are set.  At the time of writing, UC_CPU_ARM64_A72 does not support
@@ -781,19 +787,73 @@ static void test_arm64_pauth(void)
 
     const uint32_t APIAKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b000 };
     const uint32_t APIAKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b001 };
+    const uint32_t APIBKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b010 };
+    const uint32_t APIBKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b011 };
+    const uint32_t APDAKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b000 };
+    const uint32_t APDAKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b001 };
     test_arm64_pauth_cp_reg_write(uc, APIAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL);
     test_arm64_pauth_cp_reg_write(uc, APIAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
+    test_arm64_pauth_cp_reg_write(uc, APIBKeyLo_EL1, 0xCCCCCCCCCCCCCCCCULL); // != IA
+    test_arm64_pauth_cp_reg_write(uc, APIBKeyHi_EL1, 0xDDDDDDDDDDDDDDDDULL);
+    test_arm64_pauth_cp_reg_write(uc, APDAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL); // == IA
+    test_arm64_pauth_cp_reg_write(uc, APDAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
 
     // Verify that paciza signs a pointer.
 
-    uint64_t x1 = some_unsigned_pointer;
-    OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
     OK(uc_mem_write(uc, code_start, code_paciza_x1, sizeof(code_paciza_x1)));
-    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &x1));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
     OK(uc_emu_start(uc, code_start, code_start + sizeof(code_paciza_x1) - 1, 0, 0));
+    uint64_t signed_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &signed_pointer));
+    TEST_CHECK(signed_pointer != some_unsigned_pointer);
+    TEST_CHECK((signed_pointer & pac_mask) != 0);
+
+    // Verify that xpaci results in original pointer.
+
+    OK(uc_mem_write(uc, code_start, code_xpaci_x1, sizeof(code_xpaci_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_xpaci_x1) - 1, 0, 0));
+    uint64_t stripped_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &stripped_pointer));
+    TEST_CHECK(stripped_pointer == some_unsigned_pointer);
+
+    // Verify autia behaviour
+
+    uint64_t x0 = 1337;
+    uint64_t x1 = 0;
+    OK(uc_mem_write(uc, code_start, code_autiza_x1, sizeof(code_autiza_x1)));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autiza_x1) - 1, 0, 0));
     OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
-    TEST_CHECK(x1 != some_unsigned_pointer);
-    TEST_CHECK((x1 & pac_mask) != 0);
+    TEST_CHECK((x1 & pac_mask) != 0); // unsigned pointer is invalid
+
+    x1 = 0;
+    OK(uc_mem_write(uc, code_start, code_autiza_x1, sizeof(code_autiza_x1)));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autiza_x1) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
+    TEST_CHECK((x1 & pac_mask) == 0); // signed pointer is valid
+
+    x1 = 0;
+    OK(uc_mem_write(uc, code_start, code_autia_x1_x0, sizeof(code_autia_x1_x0)));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &x0));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autia_x1_x0) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
+    TEST_CHECK((x1 & pac_mask) != 0); // wrong diversifier is invalid
+
+    x1 = 0;
+    OK(uc_mem_write(uc, code_start, code_autizb_x1, sizeof(code_autizb_x1)));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autizb_x1) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
+    TEST_CHECK((x1 & pac_mask) != 0); // wrong but enabled key is invalid
+
+    x1 = 0;
+    OK(uc_mem_write(uc, code_start, code_autdza_x1, sizeof(code_autdza_x1)));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autdza_x1) - 1, 0, 0));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
+    TEST_CHECK((x1 & pac_mask) != 0); // disabled but same value key is invalid
 
     OK(uc_close(uc));
 }
