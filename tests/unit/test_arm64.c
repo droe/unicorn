@@ -740,31 +740,23 @@ static bool test_arm64_pauth_cp_reg_update(uc_engine *uc, const uint32_t cpregid
     return (((reg.val & setmask) == setmask) && ((reg.val & clearmask) == 0));
 }
 
-static void test_arm64_pauth(void)
+static void test_arm64_pauth_check_cpu_feat(uc_engine *uc)
 {
-    uc_engine *uc;
-    const char code_paciza_x1[] = "\xe1\x23\xc1\xda"; // paciza x1
-
-    // We expect a PAC added somewhere in pac_mask bits in order to make the
-    // test agnostic of TxSZ and TBI.
-
-    const uint64_t some_unsigned_pointer = 0x0000aaaabbbbccccULL;
-    const uint64_t pac_mask = 0xffff000000000000ULL & ~(1ULL << 55);
-
-    OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
-    OK(uc_ctl_set_cpu_model(uc, UC_CPU_ARM64_MAX));
-
     // Check the CPU actually supports any form of PAuth, i.e. any APA or API
     // bits are set.  At the time of writing, UC_CPU_ARM64_A72 does not support
-    // PAuth, but UC_CPU_ARM64_MAX does.  This is not required for the test,
-    // but helps with diagnostics when the selected CPU does not support PAuth.
+    // PAuth, but UC_CPU_ARM64_MAX does.  This check is not required for any of
+    // the PAuth tests to work, but helps with diagnostics when the selected
+    // CPU does not support PAuth.
 
     const uint32_t ID_AA64ISAR1_EL1[5] = { 0b11, 0b000, 0b0000, 0b0110, 0b001 };
     const uint64_t ID_AA64ISAR1_EL1_APA_API_MASK = (0b1111ULL << 4) | (0b1111ULL << 8);
     uint64_t ID_AA64ISAR1_EL1_bits = test_arm64_pauth_cp_reg_read(uc, ID_AA64ISAR1_EL1);
     TEST_CHECK((ID_AA64ISAR1_EL1_bits & ID_AA64ISAR1_EL1_APA_API_MASK) != 0);
+}
 
-    // Minimal PAuth setup, enabling only IA and IB.  The test is agnostic to
+static void test_arm64_pauth_setup(uc_engine *uc)
+{
+    // Minimal PAuth setup, enabling only IA and IB.  The tests are agnostic to
     // VA size and MTE config, so don't bother touching TCR_EL1 for now.
 
     const uint32_t SCR_EL3[5] = { 0b11, 0b110, 0b0001, 0b0001, 0b000 };
@@ -791,44 +783,149 @@ static void test_arm64_pauth(void)
     test_arm64_pauth_cp_reg_write(uc, APIBKeyHi_EL1, 0xDDDDDDDDDDDDDDDDULL);
     test_arm64_pauth_cp_reg_write(uc, APDAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL); // == IA
     test_arm64_pauth_cp_reg_write(uc, APDAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
+}
+
+static void test_arm64_pauth_vanilla(void) {
+    // PAuth test w/o using any uc_ctl interfaces, just PAuth on the CPU.
+
+    uc_engine *uc;
+    const char code_paciza_x1[] = "\xe1\x23\xc1\xda"; // paciza x1
+    const char code_autiza_x1[] = "\xe1\x33\xc1\xda"; // autiza x1
+    const char code_autizb_x1[] = "\xe1\x37\xc1\xda"; // autizb x1
+    const char code_autdza_x1[] = "\xe1\x3b\xc1\xda"; // autdza x1
+    const char code_autia_x1_x0[] = "\x01\x10\xc1\xda"; // autia x1, x0
+    const char code_xpaci_x1[] = "\xe1\x43\xc1\xda"; // xpaci x1
+
+    // We expect a PAC added somewhere in pac_mask bits in order to make the
+    // test agnostic of TxSZ and TBI.
+
+    const uint64_t some_unsigned_pointer = 0x0000aaaabbbbccccULL;
+    const uint64_t pac_mask = 0xffff000000000000ULL & ~(1ULL << 55);
+
+    OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
+    OK(uc_ctl_set_cpu_model(uc, UC_CPU_ARM64_MAX));
+    OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
+
+    test_arm64_pauth_check_cpu_feat(uc);
+    test_arm64_pauth_setup(uc);
+
+    // Verify that paciza signs a pointer.
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
+    OK(uc_mem_write(uc, code_start, code_paciza_x1, sizeof(code_paciza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_paciza_x1) - 1, 0, 0));
+    uint64_t signed_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &signed_pointer));
+    TEST_CHECK(signed_pointer != some_unsigned_pointer);
+    TEST_CHECK((signed_pointer & pac_mask) != 0);
+
+    // Verify that xpaci results in original pointer.
+
+    OK(uc_mem_write(uc, code_start, code_xpaci_x1, sizeof(code_xpaci_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_xpaci_x1) - 1, 0, 0));
+    uint64_t stripped_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &stripped_pointer));
+    TEST_CHECK(stripped_pointer == some_unsigned_pointer);
+
+    // Verify autia behaviour.
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
+    OK(uc_mem_write(uc, code_start, code_autiza_x1, sizeof(code_autiza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autiza_x1) - 1, 0, 0));
+    uint64_t authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) != 0); // unsigned pointer is invalid
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_autiza_x1, sizeof(code_autiza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autiza_x1) - 1, 0, 0));
+    authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) == 0); // signed pointer is valid
+
+    uint64_t diversifier = 1337;
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X0, &diversifier));
+    OK(uc_mem_write(uc, code_start, code_autia_x1_x0, sizeof(code_autia_x1_x0)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autia_x1_x0) - 1, 0, 0));
+    authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) != 0); // wrong diversifier is invalid
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_autizb_x1, sizeof(code_autizb_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autizb_x1) - 1, 0, 0));
+    authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) != 0); // wrong but enabled key is invalid
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_autdza_x1, sizeof(code_autdza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autdza_x1) - 1, 0, 0));
+    authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) != 0); // disabled but same value key is invalid
+
+    OK(uc_close(uc));
+}
+
+static void test_arm64_pauth_ctl(void)
+{
+    // PAuth test for the uc_ctl interfaces.
+
+    uc_engine *uc;
+    const char code_paciza_x1[] = "\xe1\x23\xc1\xda"; // paciza x1
+
+    // We expect a PAC added somewhere in pac_mask bits in order to make the
+    // test agnostic of TxSZ and TBI.
+
+    const uint64_t some_unsigned_pointer = 0x0000aaaabbbbccccULL;
+    const uint64_t pac_mask = 0xffff000000000000ULL & ~(1ULL << 55);
+
+    OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
+    OK(uc_ctl_set_cpu_model(uc, UC_CPU_ARM64_MAX));
+    OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
+
+    test_arm64_pauth_check_cpu_feat(uc);
+    test_arm64_pauth_setup(uc);
 
     // Verify that paciza and uc_ctl_pauth_sign() result in the same signed
     // pointer.
 
-    uint64_t x1 = some_unsigned_pointer;
-    OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
     OK(uc_mem_write(uc, code_start, code_paciza_x1, sizeof(code_paciza_x1)));
-    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &x1));
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
     OK(uc_emu_start(uc, code_start, code_start + sizeof(code_paciza_x1) - 1, 0, 0));
-    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &x1));
-    TEST_CHECK(x1 != some_unsigned_pointer);
-    TEST_CHECK((x1 & pac_mask) != 0);
+    uint64_t signed_pointer_paciza = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &signed_pointer_paciza));
+    TEST_CHECK(signed_pointer_paciza != some_unsigned_pointer);
+    TEST_CHECK((signed_pointer_paciza & pac_mask) != 0);
 
-    uint64_t ptr = some_unsigned_pointer;
-    OK(uc_ctl_pauth_sign(uc, ptr, UC_ARM64_PAUTH_KEY_IA, 0, &ptr));
-    TEST_CHECK(ptr == x1);
+    uint64_t signed_pointer = 0;
+    OK(uc_ctl_pauth_sign(uc, some_unsigned_pointer, UC_ARM64_PAUTH_KEY_IA, 0, &signed_pointer));
+    TEST_CHECK(signed_pointer == signed_pointer_paciza);
 
     // Verify that stripping the PAC results in the original pointer.
 
-    OK(uc_ctl_pauth_strip(uc, ptr, UC_ARM64_PAUTH_KEY_IA, &ptr));
-    TEST_CHECK(ptr == some_unsigned_pointer);
+    uint64_t stripped_pointer = 0;
+    OK(uc_ctl_pauth_strip(uc, signed_pointer, UC_ARM64_PAUTH_KEY_IA, &stripped_pointer));
+    TEST_CHECK(stripped_pointer == some_unsigned_pointer);
 
     // Verify that authenticating works as expected.
 
     bool valid = true;
-    OK(uc_ctl_pauth_auth(uc, ptr, UC_ARM64_PAUTH_KEY_IA, 0, &valid));
+    OK(uc_ctl_pauth_auth(uc, some_unsigned_pointer, UC_ARM64_PAUTH_KEY_IA, 0, &valid));
     TEST_CHECK(!valid); // unsigned pointer
     valid = false;
-    OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_IA, 0, &valid));
+    OK(uc_ctl_pauth_auth(uc, signed_pointer, UC_ARM64_PAUTH_KEY_IA, 0, &valid));
     TEST_CHECK(valid);  // signed pointer
     valid = true;
-    OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_IA, 1337, &valid));
+    OK(uc_ctl_pauth_auth(uc, signed_pointer, UC_ARM64_PAUTH_KEY_IA, 1337, &valid));
     TEST_CHECK(!valid); // wrong diversifier
     valid = true;
-    OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_IB, 0, &valid));
+    OK(uc_ctl_pauth_auth(uc, signed_pointer, UC_ARM64_PAUTH_KEY_IB, 0, &valid));
     TEST_CHECK(!valid); // wrong but enabled key
     valid = true;
-    OK(uc_ctl_pauth_auth(uc, x1, UC_ARM64_PAUTH_KEY_DA, 0, &valid));
+    OK(uc_ctl_pauth_auth(uc, signed_pointer, UC_ARM64_PAUTH_KEY_DA, 0, &valid));
     TEST_CHECK(!valid); // disabled but same value key
 
     OK(uc_close(uc));
@@ -853,5 +950,6 @@ TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_mem_prot_regress", test_arm64_mem_prot_regress},
              {"test_arm64_mem_hook_read_write", test_arm64_mem_hook_read_write},
              {"test_arm64_pc_guarantee", test_arm64_pc_guarantee},
-             {"test_arm64_pauth", test_arm64_pauth},
+             {"test_arm64_pauth_vanilla", test_arm64_pauth_vanilla},
+             {"test_arm64_pauth_ctl", test_arm64_pauth_ctl},
              {NULL, NULL}};
