@@ -729,11 +729,11 @@ See sample_ctl.c for a detailed example.
 #define uc_ctl_context_mode(uc, mode)                                          \
     uc_ctl(uc, UC_CTL_WRITE(UC_CTL_CONTEXT_MODE, 1), (mode))
 #define uc_ctl_pauth_sign(uc, ptr, key, diversifier, signed_ptr)               \
-    uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_SIGN, 4), (ptr), (key), (diversifier), (signed_ptr))
+    uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_SIGN, 4), (uint64_t)(ptr), (int)(key), (uint64_t)(diversifier), (uint64_t *)(signed_ptr))
 #define uc_ctl_pauth_strip(uc, ptr, key, stripped_ptr)                         \
-    uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_STRIP, 3), (ptr), (key), (stripped_ptr))
+    uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_STRIP, 3), (uint64_t)(ptr), (int)(key), (uint64_t *)(stripped_ptr))
 #define uc_ctl_pauth_auth(uc, ptr, key, diversifier, valid)                    \
-    uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_AUTH, 4), (ptr), (key), (diversifier), (valid))
+    uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_AUTH, 4), (uint64_t)(ptr), (int)(key), (uint64_t)(diversifier), (uint64_t *)(valid))
 
 // Opaque storage for CPU context, used with uc_context_*()
 struct uc_context;
