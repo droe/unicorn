@@ -607,8 +607,8 @@ typedef enum uc_control_type {
     UC_CTL_CONTEXT_MODE,
 
     // Sign a pointer with a given architecture-specific key and a diversifier
-    // (also known as modifier, extra data, or discriminator).  If the key is
-    // currently disabled, the operation returns the unsigned ptr.
+    // (also known as modifier, extra data, discriminator, tweak or salt).  If
+    // the key is currently disabled, the operation returns the unsigned ptr.
     // ABI-specific string hashing or address blending is up to the caller to
     // implement.
     //
@@ -633,9 +633,9 @@ typedef enum uc_control_type {
     UC_CTL_PAUTH_STRIP,
 
     // Authenticate a signed pointer with a given architecture-specific key and
-    // diversifier (also known as modifier, extra data, or discriminator).
-    // ABI-specific string hashing or address blending is up to the caller to
-    // implement.
+    // diversifier (also known as modifier, extra data, discriminator, tweak or
+    // salt).  ABI-specific string hashing or address blending is up to the
+    // caller to implement.
     //
     // Pointer authentication needs to have been set up properly beforehand.
     // Depending on architecture, current CPU state may determine pointer
