@@ -944,6 +944,101 @@ static void test_arm64_pauth_ctl(void)
     OK(uc_close(uc));
 }
 
+static void test_arm64_pauth_da(void) {
+    // Regression test for bug in qemu 5.0 where ldraa and ldrab wrongly use sp
+    // as diversifier, when they should use xzr.
+
+    uc_engine *uc;
+    const char code_pacdza_x1[] = "\xe1\x2b\xc1\xda"; // pacdza x1
+    const char code_ldraa_x0_x1[] = "\x20\x04\x20\xf8"; // ldraa x0, [x1]
+    const char code_ldraa_x0_x1_0x10[] = "\x20\x2c\x20\xf8"; // ldraa x0, [x1, #0x10]!
+    const char code_autdza_x1[] = "\xe1\x3b\xc1\xda"; // autdza x1
+
+    const uint64_t some_unsigned_pointer = code_start + 8;
+    const uint64_t pac_mask = 0xffff000000000000ULL & ~(1ULL << 55);
+
+    OK(uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc));
+    OK(uc_ctl_set_cpu_model(uc, UC_CPU_ARM64_MAX));
+    OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
+
+    test_arm64_pauth_check_cpu_feat(uc);
+    test_arm64_pauth_setup(uc, SCTLR_EL1_EnDA);
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
+    OK(uc_mem_write(uc, code_start, code_pacdza_x1, sizeof(code_pacdza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_pacdza_x1) - 1, 0, 0));
+    uint64_t signed_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &signed_pointer));
+    TEST_CHECK(signed_pointer != some_unsigned_pointer);
+    TEST_CHECK((signed_pointer & pac_mask) != 0);
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &some_unsigned_pointer));
+    OK(uc_mem_write(uc, code_start, code_autdza_x1, sizeof(code_autdza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autdza_x1) - 1, 0, 0));
+    uint64_t authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) != 0); // unsigned pointer is invalid
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_autdza_x1, sizeof(code_autdza_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_autdza_x1) - 1, 0, 0));
+    authenticated_pointer = 0;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &authenticated_pointer));
+    TEST_CHECK((authenticated_pointer & pac_mask) == 0); // signed pointer is valid
+
+    // ldraa succeeds with sp == 0
+
+    uint64_t sp = 0;
+    OK(uc_reg_write(uc, UC_ARM64_REG_SP, &sp));
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_ldraa_x0_x1, sizeof(code_ldraa_x0_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_ldraa_x0_x1) - 1, 0, 0));
+    uint64_t ptr = 0;
+    uint64_t value = 1;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &value));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &ptr));
+    TEST_CHECK(value == 0);
+    TEST_CHECK(ptr == signed_pointer);
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_ldraa_x0_x1_0x10, sizeof(code_ldraa_x0_x1_0x10)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_ldraa_x0_x1_0x10) - 1, 0, 0));
+    ptr = 0;
+    value = 1;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &value));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &ptr));
+    TEST_CHECK(value == 0);
+    TEST_CHECK(ptr == some_unsigned_pointer + 0x10);
+
+    // With the bug in qemu 5.0, ldraa fails with sp != 0
+
+    sp = 0x1300;
+    OK(uc_reg_write(uc, UC_ARM64_REG_SP, &sp));
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_ldraa_x0_x1, sizeof(code_ldraa_x0_x1)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_ldraa_x0_x1) - 1, 0, 0));
+    ptr = 0;
+    value = 1;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &value));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &ptr));
+    TEST_CHECK(value == 0);
+    TEST_CHECK(ptr == signed_pointer);
+
+    OK(uc_reg_write(uc, UC_ARM64_REG_X1, &signed_pointer));
+    OK(uc_mem_write(uc, code_start, code_ldraa_x0_x1_0x10, sizeof(code_ldraa_x0_x1_0x10)));
+    OK(uc_emu_start(uc, code_start, code_start + sizeof(code_ldraa_x0_x1_0x10) - 1, 0, 0));
+    ptr = 0;
+    value = 1;
+    OK(uc_reg_read(uc, UC_ARM64_REG_X0, &value));
+    OK(uc_reg_read(uc, UC_ARM64_REG_X1, &ptr));
+    TEST_CHECK(value == 0);
+    TEST_CHECK(ptr == some_unsigned_pointer + 0x10);
+
+    OK(uc_close(uc));
+}
+
 TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_code_patching", test_arm64_code_patching},
              {"test_arm64_code_patching_count", test_arm64_code_patching_count},
@@ -965,4 +1060,5 @@ TEST_LIST = {{"test_arm64_until", test_arm64_until},
              {"test_arm64_pc_guarantee", test_arm64_pc_guarantee},
              {"test_arm64_pauth_vanilla", test_arm64_pauth_vanilla},
              {"test_arm64_pauth_ctl", test_arm64_pauth_ctl},
+             {"test_arm64_pauth_da", test_arm64_pauth_da},
              {NULL, NULL}};
