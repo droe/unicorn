@@ -754,10 +754,15 @@ static void test_arm64_pauth_check_cpu_feat(uc_engine *uc)
     TEST_CHECK((ID_AA64ISAR1_EL1_bits & ID_AA64ISAR1_EL1_APA_API_MASK) != 0);
 }
 
-static void test_arm64_pauth_setup(uc_engine *uc)
+#define SCTLR_EL1_EnIA (1ULL << 31)
+#define SCTLR_EL1_EnIB (1ULL << 30)
+#define SCTLR_EL1_EnDA (1ULL << 27)
+#define SCTLR_EL1_EnDB (1ULL << 13)
+static void test_arm64_pauth_setup(uc_engine *uc, uint64_t SCTLR_EL1_En_bits)
 {
-    // Minimal PAuth setup, enabling only IA and IB.  The tests are agnostic to
-    // VA size and MTE config, so don't bother touching TCR_EL1 for now.
+    // Minimal PAuth setup.  The tests are agnostic to VA size and MTE config,
+    // so don't bother touching TCR_EL1 for now.  Proper setup for PAuth would
+    // also involve configuring TCR_EL1 TxSZ, TBIx, TBDIx too.
 
     const uint32_t SCR_EL3[5] = { 0b11, 0b110, 0b0001, 0b0001, 0b000 };
     const uint64_t SCR_EL3_NS_RW_API = 1ULL | (1ULL << 10) | (1ULL << 17);
@@ -768,21 +773,29 @@ static void test_arm64_pauth_setup(uc_engine *uc)
     TEST_CHECK(test_arm64_pauth_cp_reg_update(uc, HCR_EL2, 0, HCR_EL2_API));
 
     const uint32_t SCTLR_EL1[5] = { 0b11, 0b000, 0b0001, 0b0000, 0b000 };
-    const uint64_t SCTLR_EL1_EnIA_EnIB = (1ULL << 31) | (1ULL << 30);
-    TEST_CHECK(test_arm64_pauth_cp_reg_update(uc, SCTLR_EL1, 0, SCTLR_EL1_EnIA_EnIB));
+    TEST_CHECK(test_arm64_pauth_cp_reg_update(uc, SCTLR_EL1, 0, SCTLR_EL1_En_bits));
 
+    // Set up all keys.  Tests expect them being set even when not enabled.
     const uint32_t APIAKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b000 };
     const uint32_t APIAKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b001 };
     const uint32_t APIBKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b010 };
     const uint32_t APIBKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0001, 0b011 };
     const uint32_t APDAKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b000 };
     const uint32_t APDAKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b001 };
+    const uint32_t APDBKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b010 };
+    const uint32_t APDBKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0010, 0b011 };
+    const uint32_t APGAKeyLo_EL1[5] = { 0b11, 0b000, 0b0010, 0b0011, 0b000 };
+    const uint32_t APGAKeyHi_EL1[5] = { 0b11, 0b000, 0b0010, 0b0011, 0b001 };
     test_arm64_pauth_cp_reg_write(uc, APIAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL);
     test_arm64_pauth_cp_reg_write(uc, APIAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
-    test_arm64_pauth_cp_reg_write(uc, APIBKeyLo_EL1, 0xCCCCCCCCCCCCCCCCULL); // != IA
+    test_arm64_pauth_cp_reg_write(uc, APIBKeyLo_EL1, 0xCCCCCCCCCCCCCCCCULL);
     test_arm64_pauth_cp_reg_write(uc, APIBKeyHi_EL1, 0xDDDDDDDDDDDDDDDDULL);
     test_arm64_pauth_cp_reg_write(uc, APDAKeyLo_EL1, 0xAAAAAAAAAAAAAAAAULL); // == IA
     test_arm64_pauth_cp_reg_write(uc, APDAKeyHi_EL1, 0xBBBBBBBBBBBBBBBBULL);
+    test_arm64_pauth_cp_reg_write(uc, APDBKeyLo_EL1, 0xEEEEEEEEEEEEEEEEULL);
+    test_arm64_pauth_cp_reg_write(uc, APDBKeyHi_EL1, 0xFFFFFFFFFFFFFFFFULL);
+    test_arm64_pauth_cp_reg_write(uc, APGAKeyLo_EL1, 0x0123456789ABCDEFULL);
+    test_arm64_pauth_cp_reg_write(uc, APGAKeyHi_EL1, 0x0123456789ABCDEFULL);
 }
 
 static void test_arm64_pauth_vanilla(void) {
@@ -807,7 +820,7 @@ static void test_arm64_pauth_vanilla(void) {
     OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
 
     test_arm64_pauth_check_cpu_feat(uc);
-    test_arm64_pauth_setup(uc);
+    test_arm64_pauth_setup(uc, SCTLR_EL1_EnIA | SCTLR_EL1_EnIB);
 
     // Verify that paciza signs a pointer.
 
@@ -887,7 +900,7 @@ static void test_arm64_pauth_ctl(void)
     OK(uc_mem_map(uc, code_start, code_len, UC_PROT_ALL));
 
     test_arm64_pauth_check_cpu_feat(uc);
-    test_arm64_pauth_setup(uc);
+    test_arm64_pauth_setup(uc, SCTLR_EL1_EnIA | SCTLR_EL1_EnIB);
 
     // Verify that paciza and uc_ctl_pauth_sign() result in the same signed
     // pointer.
