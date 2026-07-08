@@ -651,6 +651,15 @@ typedef enum uc_control_type {
     // read the invalid_addr after an error
     // Read: @args = (uint64_t*)
     UC_CTL_INVALID_ADDR,
+    // Commit the whole code generation buffer upfront instead of relying on
+    // lazy commit. On Windows this avoids installing a process-global vectored
+    // exception handler, which is required for safe concurrent use of multiple
+    // uc instances. Must be set before the first emulation starts. Only
+    // supported on Windows builds with the VEH enabled; returns UC_ERR_ARG on
+    // Linux/macOS (where the buffer is always committed) and when the VEH is
+    // compiled out (where preallocation cannot be disabled).
+    // Write: @args = (int)
+    UC_CTL_UC_PREALLOC,
 } uc_control_type;
 
 /*
@@ -742,6 +751,8 @@ See sample_ctl.c for a detailed example.
     uc_ctl(uc, UC_CTL_READ_WRITE(UC_CTL_PAUTH_AUTH, 4), (uint64_t)(ptr), (int)(key), (uint64_t)(diversifier), (uint64_t *)(valid))
 #define uc_ctl_get_invalid_addr(uc, addr)                                    \
     uc_ctl(uc, UC_CTL_READ(UC_CTL_INVALID_ADDR, 1), (addr))
+#define uc_ctl_prealloc(uc, prealloc)                                          \
+    uc_ctl(uc, UC_CTL_WRITE(UC_CTL_UC_PREALLOC, 1), (prealloc))
 
 // Opaque storage for CPU context, used with uc_context_*()
 struct uc_context;

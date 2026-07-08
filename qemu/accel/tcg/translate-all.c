@@ -863,6 +863,7 @@ static inline void *alloc_code_gen_buffer(struct uc_struct *uc)
     return buf;
 }
 #elif defined(_WIN32)
+#ifdef WIN32_ENABLE_VEH
 #define COMMIT_COUNT (1024) // Commit 4MB per exception
 #define CLOSURE_SIZE (4096)
 
@@ -908,16 +909,24 @@ static inline void may_remove_handler(struct uc_struct *uc) {
         VirtualFree(uc->seh_closure, 0, MEM_RELEASE);
     }
 }
+#endif // WIN32_ENABLE_VEH
 
 static inline void *alloc_code_gen_buffer(struct uc_struct *uc)
 {
     TCGContext *tcg_ctx = uc->tcg_ctx;
     size_t size = tcg_ctx->code_gen_buffer_size;
+#ifdef WIN32_ENABLE_VEH
     uint8_t *closure, *data;
     uint8_t *ptr;
     void* handler = code_gen_buffer_handler;
 
-    may_remove_handler(uc);    
+    if (uc->prealloc) {
+        // Commit the whole buffer upfront so no lazy-commit exception handler
+        // is needed. Required for safe concurrent use of multiple uc instances.
+        return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    }
+
+    may_remove_handler(uc);
 
     // Naive trampoline implementation
     closure = VirtualAlloc(NULL, CLOSURE_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
@@ -988,7 +997,7 @@ static inline void *alloc_code_gen_buffer(struct uc_struct *uc)
     memcpy(data + 0xC, (void*)&handler, 4);
 #endif
 
-    uc->seh_handle = AddVectoredExceptionHandler(0, (PVECTORED_EXCEPTION_HANDLER)closure);
+    uc->seh_handle = AddVectoredExceptionHandler(1, (PVECTORED_EXCEPTION_HANDLER)closure);
     if (!uc->seh_handle) {
         VirtualFree(uc->seh_closure, 0, MEM_RELEASE);
         uc->seh_closure = NULL;
@@ -996,12 +1005,18 @@ static inline void *alloc_code_gen_buffer(struct uc_struct *uc)
     }
 
     return VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+#else
+    // The VEH lazy-commit path is compiled out: always commit upfront.
+    return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+#endif // WIN32_ENABLE_VEH
 }
 void free_code_gen_buffer(struct uc_struct *uc)
 {
     TCGContext *tcg_ctx = uc->tcg_ctx;
     if (tcg_ctx->initial_buffer) {
+#ifdef WIN32_ENABLE_VEH
         may_remove_handler(uc);
+#endif
         VirtualFree(tcg_ctx->initial_buffer, 0, MEM_RELEASE);
     }
 }

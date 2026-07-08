@@ -3096,6 +3096,37 @@ uc_err uc_ctl(uc_engine *uc, uc_control_type control, ...)
         }
         break;
 
+    case UC_CTL_UC_PREALLOC: {
+        if (rw == UC_CTL_IO_WRITE) {
+#if defined(WIN32) && defined(WIN32_ENABLE_VEH)
+            int prealloc = va_arg(args, int);
+
+            // Must be decided before the code gen buffer is allocated.
+            if (uc->init_done) {
+                err = UC_ERR_ARG;
+            } else {
+                uc->prealloc = (bool)prealloc;
+            }
+#elif defined(WIN32)
+            // The VEH lazy-commit path is compiled out, so preallocation is
+            // mandatory on Windows. Refuse to disable it; enabling it is
+            // already the effective behavior.
+            int prealloc = va_arg(args, int);
+
+            if (uc->init_done || !prealloc) {
+                err = UC_ERR_ARG;
+            }
+#else
+            // Not applicable on Linux/macOS: the code gen buffer is always
+            // committed and there is no VEH to opt out of.
+            err = UC_ERR_ARG;
+#endif
+        } else {
+            err = UC_ERR_ARG;
+        }
+        break;
+    }
+
     default:
         err = UC_ERR_ARG;
         break;

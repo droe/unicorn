@@ -430,7 +430,13 @@ struct uc_struct {
     FlatView *empty_view; // Static function variable moved from flatviews_init
 
     uint32_t tcg_buffer_size; // The buffer size we are going to use
-#ifdef WIN32
+#if defined(WIN32) && defined(WIN32_ENABLE_VEH)
+    bool prealloc; // Commit the whole code gen buffer upfront instead of
+                   // relying on lazy commit via the vectored exception handler.
+                   // Avoids installing the process-global VEH, which is required
+                   // for safe concurrent use of multiple uc instances. Only
+                   // meaningful when the VEH path is compiled in; without it the
+                   // buffer is always committed upfront.
     PVOID seh_handle;
     void *seh_closure;
 #endif
