@@ -10123,6 +10123,7 @@ static void ppc_cpu_reset(CPUState *dev)
     }
 #endif
 
+    env->msr |= MSR_HVB; // alter_hv only does anything if MSR_HVB is already set
     hreg_store_msr(env, msr, 1);
 
     env->nip = env->hreset_vector | env->excp_prefix;
@@ -11011,11 +11012,12 @@ PowerPCCPU *cpu_ppc_init(struct uc_struct *uc)
     memset(cpu, 0, sizeof(*cpu));
 #ifdef TARGET_PPC64
     if (uc->cpu_model == INT_MAX) {
-        uc->cpu_model = UC_CPU_PPC64_POWER10_V1_0 + UC_CPU_PPC32_7457A_V1_2 + 1; // power10_v1.0
+        uc->cpu_model = UC_CPU_PPC64_POWER10_V1_0; // power10_v1.0
     } else if (uc->cpu_model + UC_CPU_PPC32_7457A_V1_2 + 1 >= ARRAY_SIZE(ppc_cpus)) {
         free(cpu);
         return NULL;
     }
+    uc->cpu_model += UC_CPU_PPC32_7457A_V1_2 + 1; // PPC64 models come after PPC32
 #else
     if (uc->cpu_model == INT_MAX) {
         uc->cpu_model = UC_CPU_PPC32_7457A_V1_2; // 7457a_v1.2
